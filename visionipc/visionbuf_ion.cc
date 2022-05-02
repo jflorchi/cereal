@@ -14,6 +14,7 @@
 
 #include <msm_ion.h>
 
+#include "logger/logger.h"
 #include "visionbuf.h"
 
 // keep trying if x gets interrupted by a signal
@@ -102,6 +103,18 @@ void VisionBuf::import(){
 
 void VisionBuf::init_cl(cl_device_id device_id, cl_context ctx) {
   int err;
+
+  size_t device_page_size = 0;
+  clGetDeviceInfo(device_id, CL_DEVICE_PAGE_SIZE_QCOM,
+                  sizeof(device_page_size), &device_page_size,
+                  NULL);
+  LOGD("device_page_size: %d", device_page_size);
+
+  size_t padding_cl = 0;
+  clGetDeviceInfo(device_id, CL_DEVICE_EXT_MEM_PADDING_IN_BYTES_QCOM,
+                  sizeof(padding_cl), &padding_cl,
+                  NULL);
+  LOGD("padding_cl: %d", padding_cl);
 
   assert(((uintptr_t)this->addr % DEVICE_PAGE_SIZE_CL) == 0);
 

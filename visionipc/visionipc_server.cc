@@ -30,6 +30,8 @@ VisionIpcServer::VisionIpcServer(std::string name, cl_device_id device_id, cl_co
 }
 
 void VisionIpcServer::create_buffers(VisionStreamType type, size_t num_buffers, bool rgb, size_t width, size_t height){
+  LOGD("create_buffers: type=%d num_buffers=%d rgb=%d width=%d height=%d", type, num_buffers, rgb, width, height);
+
   // TODO: assert that this type is not created yet
   assert(num_buffers < VISIONIPC_MAX_FDS);
   int aligned_w = 0, aligned_h = 0;
@@ -41,18 +43,25 @@ void VisionIpcServer::create_buffers(VisionStreamType type, size_t num_buffers, 
     visionbuf_compute_aligned_width_and_height(width, height, &aligned_w, &aligned_h);
     size = (size_t)aligned_w * (size_t)aligned_h * 3;
     stride = aligned_w * 3;
+    LOGD("create_buffers: size=%d stride=%d", size, stride);
   } else {
     size = width * height * 3 / 2;
+    LOGD("create_buffers: size=%d", size);
   }
 
   // Create map + alloc requested buffers
   for (size_t i = 0; i < num_buffers; i++){
+    LOGD("create_buffers: allocating buffer %d", i);
+
     VisionBuf* buf = new VisionBuf();
     buf->allocate(size);
     buf->idx = i;
     buf->type = type;
 
-    if (device_id) buf->init_cl(device_id, ctx);
+    if (device_id) {
+      LOGD("create_buffers: init cl");
+      buf->init_cl(device_id, ctx);
+    }
 
     rgb ? buf->init_rgb(width, height, stride) : buf->init_yuv(width, height);
 
