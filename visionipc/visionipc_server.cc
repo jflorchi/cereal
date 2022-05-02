@@ -54,17 +54,12 @@ void VisionIpcServer::create_buffers(VisionStreamType type, size_t num_buffers, 
 
   // Create map + alloc requested buffers
   for (size_t i = 0; i < num_buffers; i++){
-    LOGD("create_buffers: allocating buffer %d", i);
-
     VisionBuf* buf = new VisionBuf();
     buf->allocate(size);
     buf->idx = i;
     buf->type = type;
 
-    if (device_id) {
-      LOGD("create_buffers: init cl");
-      buf->init_cl(device_id, ctx);
-    }
+    if (device_id) buf->init_cl(device_id, ctx);
 
     rgb ? buf->init_rgb(width, height, stride) : buf->init_yuv(width, height);
 
