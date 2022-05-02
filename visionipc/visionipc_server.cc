@@ -41,6 +41,7 @@ void VisionIpcServer::create_buffers(VisionStreamType type, size_t num_buffers, 
 
   if (rgb) {
     visionbuf_compute_aligned_width_and_height(width, height, &aligned_w, &aligned_h);
+    LOGD("create_buffers: aligned_w=%d aligned_h=%d", aligned_w, aligned_h);
     size = (size_t)aligned_w * (size_t)aligned_h * 3;
     stride = aligned_w * 3;
     LOGD("create_buffers: size=%d stride=%d", size, stride);
