@@ -127,6 +127,7 @@ void VisionBuf::init_cl(cl_device_id device_id, cl_context ctx) {
   this->buf_cl = clCreateBuffer(ctx,
                               CL_MEM_USE_HOST_PTR | CL_MEM_EXT_HOST_PTR_QCOM,
                               this->len, &ion_cl, &err);
+  LOGD("clCreateBuffer: %d", err);
   assert(err == 0);
 }
 
