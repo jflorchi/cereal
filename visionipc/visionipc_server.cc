@@ -40,8 +40,10 @@ void VisionIpcServer::create_buffers(VisionStreamType type, size_t num_buffers, 
   size_t stride = 0; // Only used for RGB
 
   if (rgb) {
-    visionbuf_compute_aligned_width_and_height(width, height, &aligned_w, &aligned_h);
-    LOGD("create_buffers: aligned_w=%d aligned_h=%d", aligned_w, aligned_h);
+    // visionbuf_compute_aligned_width_and_height(width, height, &aligned_w, &aligned_h);
+    aligned_w = width;
+    aligned_h = height;
+    LOGD("create_buffers: DEBUG aligned_w=%d aligned_h=%d", aligned_w, aligned_h);
     size = (size_t)aligned_w * (size_t)aligned_h * 3;
     stride = aligned_w * 3;
     LOGD("create_buffers: size=%d stride=%d", size, stride);
