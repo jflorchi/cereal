@@ -49,6 +49,8 @@ static void ion_init() {
 }
 
 void VisionBuf::allocate(size_t length) {
+  LOGW("VisionBuf allocating %zu bytes", length);
+
   int err;
 
   ion_init();
@@ -82,7 +84,9 @@ void VisionBuf::allocate(size_t length) {
   this->frame_id = (uint64_t*)((uint8_t*)this->addr + this->len + PADDING_CL);
 }
 
-void VisionBuf::import(){
+void VisionBuf::import() {
+  LOGW("VisionBuf import");
+
   int err;
   assert(this->fd >= 0);
 
@@ -102,6 +106,8 @@ void VisionBuf::import(){
 }
 
 void VisionBuf::init_cl(cl_device_id device_id, cl_context ctx) {
+  LOGW("VisionBuf init_cl");
+
   int err;
 
   assert(((uintptr_t)this->addr % DEVICE_PAGE_SIZE_CL) == 0);
