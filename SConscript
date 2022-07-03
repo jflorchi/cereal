@@ -49,13 +49,17 @@ vipc_sources = [
   'visionipc/visionbuf.cc',
 ]
 
+libs = []
 if arch in ["aarch64", "larch64"]:
   vipc_sources += ['visionipc/visionbuf_ion.cc']
+  libs.append("ion")
+  libs.append("lzma")
+  libs.append("xml2")
 else:
   vipc_sources += ['visionipc/visionbuf_cl.cc']
 
 vipc_objects = env.SharedObject(vipc_sources)
-vipc = env.Library('visionipc', vipc_objects)
+vipc = env.Library('visionipc', vipc_objects, LIBS=libs)
 
 
 vipc_frameworks = []

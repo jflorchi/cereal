@@ -9,7 +9,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <linux/ion.h>
+#include <ion.h>
 #include <CL/cl_ext.h>
 
 #include <msm_ion.h>
@@ -24,7 +24,7 @@
     int try_cnt = 0;                                          \
     do {                                                      \
       ret = (x);                                              \
-    } while (ret == -1 && errno == EINTR && try_cnt++ < 100); \
+    } while (ret == -1 && (errno == EINTR || errno == EAGAIN) && try_cnt++ < 100); \
     ret;                                                      \
   })
 
@@ -49,27 +49,36 @@ static void ion_init() {
 }
 
 void VisionBuf::allocate(size_t length) {
+  LOG("length %d", length);
   int err;
 
   ion_init();
+  LOG("ION %d", ion_fd);
 
-  struct ion_allocation_data ion_alloc = {0};
+  struct ion_allocation_data ion_alloc; // = {0};
   ion_alloc.len = length + PADDING_CL + sizeof(uint64_t);
   ion_alloc.align = 4096;
-  ion_alloc.heap_id_mask = 1 << ION_IOMMU_HEAP_ID;
+  ion_alloc.heap_id_mask = 1 <<  ION_IOMMU_HEAP_ID;
   ion_alloc.flags = ION_FLAG_CACHED;
 
-  err = HANDLE_EINTR(ioctl(ion_fd, ION_IOC_ALLOC, &ion_alloc));
+  struct ion_fd_data ion_fd_data = {0};
+  err = HANDLE_EINTR(ion_alloc_fd(ion_fd, length + PADDING_CL + sizeof(uint64_t), 4096, 1 << ION_IOMMU_HEAP_ID, ION_FLAG_CACHED, &ion_fd_data.handle));
+  //err = HANDLE_EINTR(ioctl(ion_fd, ION_IOC_ALLOC, &ion_alloc));
+  LOG("err %d", err);
+  LOG("errno %d", errno);
+  LOG("explain %s", strerror(errno));
   assert(err == 0);
 
-  struct ion_fd_data ion_fd_data = {0};
-  ion_fd_data.handle = ion_alloc.handle;
-  err = HANDLE_EINTR(ioctl(ion_fd, ION_IOC_SHARE, &ion_fd_data));
-  assert(err == 0);
+//  struct ion_fd_data ion_fd_data = {0};
+//  ion_fd_data.handle = ion_alloc.handle;
+//  err = HANDLE_EINTR(ioctl(ion_fd, ION_IOC_SHARE, &ion_fd_data));
+//  LOG("err %d", err);
+//  assert(err == 0);
 
   void *mmap_addr = mmap(NULL, ion_alloc.len,
                          PROT_READ | PROT_WRITE,
-                         MAP_SHARED, ion_fd_data.fd, 0);
+                         MAP_SHARED, ion_fd_data.handle, 0);
+  LOG("map %d", mmap_addr);
   assert(mmap_addr != MAP_FAILED);
 
   memset(mmap_addr, 0, ion_alloc.len);
@@ -78,23 +87,23 @@ void VisionBuf::allocate(size_t length) {
   this->mmap_len = ion_alloc.len;
   this->addr = mmap_addr;
   this->handle = ion_alloc.handle;
-  this->fd = ion_fd_data.fd;
+  this->fd = ion_fd_data.handle;//ion_fd_data.fd;
   this->frame_id = (uint64_t*)((uint8_t*)this->addr + this->len + PADDING_CL);
 }
 
 void VisionBuf::import() {
-  int err;
+  //int err;
   assert(this->fd >= 0);
 
   ion_init();
 
   // Get handle
-  struct ion_fd_data fd_data = {0};
-  fd_data.fd = this->fd;
-  err = HANDLE_EINTR(ioctl(ion_fd, ION_IOC_IMPORT, &fd_data));
-  assert(err == 0);
+//  struct ion_fd_data fd_data = {0};
+//  fd_data.fd = this->fd;
+//  err = HANDLE_EINTR(ioctl(this->fd, ION_IOC_IMPORT, &fd_data));
+//  assert(err == 0);
 
-  this->handle = fd_data.handle;
+  this->handle = this->fd; // fd_data.handle;
   this->addr = mmap(NULL, this->mmap_len, PROT_READ | PROT_WRITE, MAP_SHARED, this->fd, 0);
   assert(this->addr != MAP_FAILED);
 
@@ -134,11 +143,10 @@ int VisionBuf::sync(int dir) {
   struct ion_custom_data custom_data = {0};
 
    assert(dir == VISIONBUF_SYNC_FROM_DEVICE || dir == VISIONBUF_SYNC_TO_DEVICE);
-   custom_data.cmd = (dir == VISIONBUF_SYNC_FROM_DEVICE) ?
-     ION_IOC_INV_CACHES : ION_IOC_CLEAN_CACHES;
+   custom_data.cmd = (dir == VISIONBUF_SYNC_FROM_DEVICE) ? ION_IOC_INV_CACHES : ION_IOC_CLEAN_CACHES;
 
   custom_data.arg = (unsigned long)&flush_data;
-  return HANDLE_EINTR(ioctl(ion_fd, ION_IOC_CUSTOM, &custom_data));
+  return HANDLE_EINTR(ioctl(this->fd, ION_IOC_CUSTOM, &custom_data));
 }
 
 int VisionBuf::free() {
@@ -155,6 +163,7 @@ int VisionBuf::free() {
   err = close(this->fd);
   if (err != 0) return err;
 
-  struct ion_handle_data handle_data = {.handle = this->handle};
-  return HANDLE_EINTR(ioctl(ion_fd, ION_IOC_FREE, &handle_data));
+  //struct ion_handle_data handle_data = {.handle = this->handle};
+  return HANDLE_EINTR(close(this->fd));
+  //return HANDLE_EINTR(ioctl(this->fd, ION_IOC_FREE, &handle_data));
 }
