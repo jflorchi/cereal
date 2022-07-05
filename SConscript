@@ -1,6 +1,12 @@
+import subprocess
 Import('env', 'envCython', 'arch', 'common')
 
 import shutil
+
+real_arch = arch = subprocess.check_output(["uname", "-m"], encoding='utf8').rstrip()
+android_version = 0
+if arch == "aarch64":
+  android_version = subprocess.check_output(["getprop", "ro.build.version.release"], encoding='utf8').rstrip()
 
 cereal_dir = Dir('.')
 gen_dir = Dir('gen')
@@ -52,9 +58,10 @@ vipc_sources = [
 libs = []
 if arch in ["aarch64", "larch64"]:
   vipc_sources += ['visionipc/visionbuf_ion.cc']
-  libs.append("ion")
-  libs.append("lzma")
-  libs.append("xml2")
+  if android_version == '10':
+    libs.append("ion")
+    libs.append("lzma")
+    libs.append("xml2")
 else:
   vipc_sources += ['visionipc/visionbuf_cl.cc']
 

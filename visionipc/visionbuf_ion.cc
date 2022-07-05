@@ -9,9 +9,15 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <ion.h>
-#include <CL/cl_ext.h>
 
+#ifdef ANDROID_10
+#include <ion.h>
+#include <linux/dma-buf.h>
+#elif
+#include <linux/ion.h>
+#endif
+
+#include <CL/cl_ext.h>
 #include <msm_ion.h>
 
 #include "logger/logger.h"
@@ -24,7 +30,7 @@
     int try_cnt = 0;                                          \
     do {                                                      \
       ret = (x);                                              \
-    } while (ret == -1 && (errno == EINTR || errno == EAGAIN) && try_cnt++ < 100); \
+    } while (ret == -1 && errno == EINTR && try_cnt++ < 100); \
     ret;                                                      \
   })
 
@@ -49,11 +55,9 @@ static void ion_init() {
 }
 
 void VisionBuf::allocate(size_t length) {
-  LOG("length %d", length);
   int err;
 
   ion_init();
-  LOG("ION %d", ion_fd);
 
   struct ion_allocation_data ion_alloc; // = {0};
   ion_alloc.len = length + PADDING_CL + sizeof(uint64_t);
@@ -61,49 +65,63 @@ void VisionBuf::allocate(size_t length) {
   ion_alloc.heap_id_mask = 1 <<  ION_IOMMU_HEAP_ID;
   ion_alloc.flags = ION_FLAG_CACHED;
 
-  struct ion_fd_data ion_fd_data = {0};
-  err = HANDLE_EINTR(ion_alloc_fd(ion_fd, length + PADDING_CL + sizeof(uint64_t), 4096, 1 << ION_IOMMU_HEAP_ID, ION_FLAG_CACHED, &ion_fd_data.handle));
-  //err = HANDLE_EINTR(ioctl(ion_fd, ION_IOC_ALLOC, &ion_alloc));
-  LOG("err %d", err);
-  LOG("errno %d", errno);
-  LOG("explain %s", strerror(errno));
+#ifdef ANDROID_10
+  int tmp_handle;
+  err = HANDLE_EINTR(ion_alloc_fd(ion_fd, ion_alloc.len, ion_alloc.align, ion_alloc.heap_id_mask, ion_alloc.flags, &tmp_handle));
   assert(err == 0);
+#elif
+  struct ion_fd_data ion_fd_data = {0};
+  err = HANDLE_EINTR(ioctl(ion_fd, ION_IOC_ALLOC, &ion_alloc));
+  assert(err == 0);
+  ion_fd_data.handle = ion_alloc.handle;
+  err = HANDLE_EINTR(ioctl(ion_fd, ION_IOC_SHARE, &ion_fd_data));
+  assert(err == 0);
+#endif
 
-//  struct ion_fd_data ion_fd_data = {0};
-//  ion_fd_data.handle = ion_alloc.handle;
-//  err = HANDLE_EINTR(ioctl(ion_fd, ION_IOC_SHARE, &ion_fd_data));
-//  LOG("err %d", err);
-//  assert(err == 0);
-
+#ifdef ANDROID_10
   void *mmap_addr = mmap(NULL, ion_alloc.len,
                          PROT_READ | PROT_WRITE,
-                         MAP_SHARED, ion_fd_data.handle, 0);
-  LOG("map %d", mmap_addr);
+                         MAP_SHARED, tmp_handle, 0);
   assert(mmap_addr != MAP_FAILED);
+#elif
+  void *mmap_addr = mmap(NULL, ion_alloc.len,
+                         PROT_READ | PROT_WRITE,
+                         MAP_SHARED, ion_fd_data.fd, 0);
+  assert(mmap_addr != MAP_FAILED);
+#endif
 
   memset(mmap_addr, 0, ion_alloc.len);
 
   this->len = length;
   this->mmap_len = ion_alloc.len;
   this->addr = mmap_addr;
+#ifdef ANDROID_10
+  this->handle = tmp_handle;
+  this->fd = tmp_handle;
+#elif
   this->handle = ion_alloc.handle;
-  this->fd = ion_fd_data.handle;//ion_fd_data.fd;
+  this->fd = ion_fd_data.fd;
+#endif
   this->frame_id = (uint64_t*)((uint8_t*)this->addr + this->len + PADDING_CL);
 }
 
 void VisionBuf::import() {
-  //int err;
   assert(this->fd >= 0);
 
   ion_init();
 
+#ifdef ANDROID_10
+  this->handle = this->fd;
+#elif
   // Get handle
-//  struct ion_fd_data fd_data = {0};
-//  fd_data.fd = this->fd;
-//  err = HANDLE_EINTR(ioctl(this->fd, ION_IOC_IMPORT, &fd_data));
-//  assert(err == 0);
+  int err;
+  struct ion_fd_data fd_data = {0};
+  fd_data.fd = this->fd;
+  err = HANDLE_EINTR(ioctl(ion_fd, ION_IOC_IMPORT, &fd_data));
+  assert(err == 0);
+  this->handle = fd_data.handle;
+#endif
 
-  this->handle = this->fd; // fd_data.handle;
   this->addr = mmap(NULL, this->mmap_len, PROT_READ | PROT_WRITE, MAP_SHARED, this->fd, 0);
   assert(this->addr != MAP_FAILED);
 
@@ -130,6 +148,11 @@ void VisionBuf::init_cl(cl_device_id device_id, cl_context ctx) {
 
 
 int VisionBuf::sync(int dir) {
+#ifdef ANDROID_10
+  struct dma_buf_sync sync = { 0 };
+  sync.flags = (dir == VISIONBUF_SYNC_FROM_DEVICE) ? DMA_BUF_SYNC_READ | DMA_BUF_SYNC_START : DMA_BUF_SYNC_READ | DMA_BUF_SYNC_END;
+  return HANDLE_EINTR(ioctl(this->handle, DMA_BUF_IOCTL_SYNC, &sync));
+#elif
   struct ion_flush_data flush_data = {0};
   flush_data.handle = this->handle;
   flush_data.vaddr = this->addr;
@@ -141,12 +164,11 @@ int VisionBuf::sync(int dir) {
   // ION_IOC_CLEAN_INV_CACHES ~= DMA_BIDIRECTIONAL
 
   struct ion_custom_data custom_data = {0};
-
-   assert(dir == VISIONBUF_SYNC_FROM_DEVICE || dir == VISIONBUF_SYNC_TO_DEVICE);
-   custom_data.cmd = (dir == VISIONBUF_SYNC_FROM_DEVICE) ? ION_IOC_INV_CACHES : ION_IOC_CLEAN_CACHES;
-
+  assert(dir == VISIONBUF_SYNC_FROM_DEVICE || dir == VISIONBUF_SYNC_TO_DEVICE);
+  custom_data.cmd = (dir == VISIONBUF_SYNC_FROM_DEVICE) ? ION_IOC_INV_CACHES : ION_IOC_CLEAN_CACHES;
   custom_data.arg = (unsigned long)&flush_data;
-  return HANDLE_EINTR(ioctl(this->fd, ION_IOC_CUSTOM, &custom_data));
+  return HANDLE_EINTR(ioctl(ion_fd, ION_IOC_CUSTOM, &custom_data));
+#endif
 }
 
 int VisionBuf::free() {
@@ -163,7 +185,10 @@ int VisionBuf::free() {
   err = close(this->fd);
   if (err != 0) return err;
 
-  //struct ion_handle_data handle_data = {.handle = this->handle};
-  return HANDLE_EINTR(close(this->fd));
-  //return HANDLE_EINTR(ioctl(this->fd, ION_IOC_FREE, &handle_data));
+#ifdef ANDROID_10
+  return 0;
+#elif
+  struct ion_handle_data handle_data = {.handle = this->handle};
+  return HANDLE_EINTR(ioctl(ion_fd, ION_IOC_FREE, &handle_data));
+#endif
 }
